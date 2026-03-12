@@ -40,6 +40,9 @@ See the [`examples/`](examples/) directory for the following examples:
 * [resource-attributes example](examples/resource-attributes)
 * [oidc example](examples/oidc)
 * [rewriting SubjectAccessReviews based on request query parameters](examples/rewrites)
+* [impersonation bypass with ServiceAccount verification](examples/impersonation-bypass-service-account)
+
+For header-based impersonation mode details, see [Kubernetes impersonation bypass mode](#kubernetes-impersonation-bypass-mode).
 
 All command line flags:
 
@@ -95,6 +98,77 @@ Global flags:
 
   -h, --help                     help for kube-rbac-proxy
       --version version[=true]   --version, --version=raw prints version information and quits; --version=vX.Y.Z... sets the reported version
+```
+
+### Kubernetes impersonation bypass mode
+
+`kube-rbac-proxy` supports an opt-in mode that trusts Kubernetes impersonation
+headers for request identity.
+
+Enable it with:
+
+```bash
+kube-rbac-proxy \
+  --secure-listen-address=0.0.0.0:8443 \
+  --upstream=http://127.0.0.1:8080 \
+  --config-file=/etc/kube-rbac-proxy/config.yaml \
+  --auth-impersonation-bypass
+```
+
+You can also override header names:
+
+```bash
+kube-rbac-proxy \
+  --auth-impersonation-bypass \
+  --auth-impersonation-user-header=Impersonate-User \
+  --auth-impersonation-group-header=Impersonate-Group \
+  --auth-impersonation-uid-header=Impersonate-Uid \
+  --auth-impersonation-extra-header-prefix=Impersonate-Extra-
+```
+
+Optional: require bearer tokens to match a specific ServiceAccount before bypassing
+delegated identity:
+
+```bash
+kube-rbac-proxy \
+  --auth-impersonation-bypass \
+  --auth-impersonation-verify-service-account-namespace=observability \
+  --auth-impersonation-verify-service-account-name=proxy-client
+```
+
+Header contract when `--auth-impersonation-bypass` is enabled:
+
+| Condition | Result |
+| --- | --- |
+| `Authorization` starts with `Bearer ` and impersonation user header is present, verification flags are not set | **Bypass path**: TokenReview is skipped. Authenticated identity is built from impersonation headers and used for SubjectAccessReview. |
+| `Authorization` starts with `Bearer ` and impersonation user header is present, verification flags are set | **Verified bypass path**: delegated authentication performs TokenReview and must authenticate as `system:serviceaccount:<namespace>:<name>`. If verification succeeds, impersonation headers are used for SubjectAccessReview. |
+| Any other request shape | **Default path**: delegated authentication runs as usual (including TokenReview for bearer tokens). |
+
+Supported impersonation headers in bypass path:
+
+| Header | Default name | Required | Mapping |
+| --- | --- | --- | --- |
+| User | `Impersonate-User` | Yes | `user.Info.Name` |
+| Group (repeatable) | `Impersonate-Group` | No | `user.Info.Groups` |
+| UID | `Impersonate-Uid` | No | `user.Info.UID` |
+| Extra (prefix + key) | `Impersonate-Extra-<key>` | No | `user.Info.Extra[<key>]` |
+
+Notes:
+
+* Extra keys are URL-decoded (for example `Impersonate-Extra-acme.com%2Ftenant` maps to `acme.com/tenant`).
+* Without verification flags, this mode does **not** validate bearer tokens with TokenReview on bypassed requests.
+* Verification flags must be set together and require `--auth-impersonation-bypass`.
+* Use only in trusted environments where clients are explicitly allowed to send impersonation headers.
+
+Example request:
+
+```bash
+curl -k https://127.0.0.1:8443/metrics \
+  -H "Authorization: Bearer <service-account-token>" \
+  -H "Impersonate-User: alice@example.com" \
+  -H "Impersonate-Group: team-observability" \
+  -H "Impersonate-Uid: 12345" \
+  -H "Impersonate-Extra-acme.com%2Ftenant: prod"
 ```
 
 

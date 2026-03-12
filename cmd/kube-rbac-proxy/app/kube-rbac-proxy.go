@@ -243,6 +243,11 @@ func Run(cfg *completedProxyRunOptions) error {
 		authenticator = delegatingAuthenticator
 	}
 
+	if cfg.auth.Authentication.Impersonation != nil && cfg.auth.Authentication.Impersonation.Enabled {
+		klog.Warning("Authentication impersonation bypass mode is enabled; bearer token requests with impersonation user header bypass delegated identity, and optional service account verification can enforce TokenReview")
+		authenticator = authn.NewImpersonationBypassAuthenticator(authenticator, cfg.auth.Authentication.Impersonation)
+	}
+
 	sarClient := cfg.kubeClient.AuthorizationV1()
 	sarAuthorizer, err := authz.NewSarAuthorizer(sarClient)
 	if err != nil {

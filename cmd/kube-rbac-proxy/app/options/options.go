@@ -76,6 +76,13 @@ func NewProxyRunOptions() *ProxyRunOptions {
 				Header: &authn.AuthnHeaderConfig{},
 				OIDC:   &authn.OIDCConfig{},
 				Token:  &authn.TokenConfig{},
+				Impersonation: &authn.ImpersonationConfig{
+					UserHeader:        "Impersonate-User",
+					GroupHeader:       "Impersonate-Group",
+					UIDHeader:         "Impersonate-Uid",
+					ExtraHeaderPrefix: "Impersonate-Extra-",
+					ServiceAccount:    &authn.ImpersonationServiceAccountConfig{},
+				},
 			},
 			Authorization: &authz.Config{},
 		},
@@ -114,6 +121,13 @@ func (o *ProxyRunOptions) Flags() k8sapiflag.NamedFlagSets {
 	flagset.StringVar(&o.Auth.Authentication.Header.GroupsFieldName, "auth-header-groups-field-name", "x-remote-groups", "The name of the field inside a http(2) request header to tell the upstream server about the user's groups")
 	flagset.StringVar(&o.Auth.Authentication.Header.GroupSeparator, "auth-header-groups-field-separator", "|", "The separator string used for concatenating multiple group names in a groups header field's value")
 	flagset.StringSliceVar(&o.Auth.Authentication.Token.Audiences, "auth-token-audiences", []string{}, "Comma-separated list of token audiences to accept. By default a token does not have to have any specific audience. It is recommended to set a specific audience.")
+	flagset.BoolVar(&o.Auth.Authentication.Impersonation.Enabled, "auth-impersonation-bypass", false, "Enable Kubernetes impersonation header mode. If request includes Authorization: Bearer and impersonation user header, kube-rbac-proxy authorizes as the impersonated identity. TokenReview is skipped unless service account verification flags are set.")
+	flagset.StringVar(&o.Auth.Authentication.Impersonation.UserHeader, "auth-impersonation-user-header", "Impersonate-User", "Header name used for impersonated username when auth-impersonation-bypass is enabled.")
+	flagset.StringVar(&o.Auth.Authentication.Impersonation.GroupHeader, "auth-impersonation-group-header", "Impersonate-Group", "Header name used for impersonated groups when auth-impersonation-bypass is enabled.")
+	flagset.StringVar(&o.Auth.Authentication.Impersonation.UIDHeader, "auth-impersonation-uid-header", "Impersonate-Uid", "Header name used for impersonated UID when auth-impersonation-bypass is enabled.")
+	flagset.StringVar(&o.Auth.Authentication.Impersonation.ExtraHeaderPrefix, "auth-impersonation-extra-header-prefix", "Impersonate-Extra-", "Prefix used for impersonated extra fields when auth-impersonation-bypass is enabled.")
+	flagset.StringVar(&o.Auth.Authentication.Impersonation.ServiceAccount.Namespace, "auth-impersonation-verify-service-account-namespace", "", "If set with --auth-impersonation-verify-service-account-name, verify bearer token via TokenReview belongs to this ServiceAccount namespace before bypassing delegated authentication.")
+	flagset.StringVar(&o.Auth.Authentication.Impersonation.ServiceAccount.Name, "auth-impersonation-verify-service-account-name", "", "If set with --auth-impersonation-verify-service-account-namespace, verify bearer token via TokenReview belongs to this ServiceAccount name before bypassing delegated authentication.")
 
 	//Authn OIDC flags
 	flagset.StringVar(&o.Auth.Authentication.OIDC.IssuerURL, "oidc-issuer", "", "The URL of the OpenID issuer, only HTTPS scheme will be accepted. If set, it will be used to verify the OIDC JSON Web Token (JWT).")
@@ -179,6 +193,39 @@ For more information, please go to https://github.com/brancz/kube-rbac-proxy/iss
 
 	if len(o.AllowPaths) > 0 && len(o.IgnorePaths) > 0 {
 		errs = append(errs, fmt.Errorf("cannot use --allow-paths and --ignore-paths together"))
+	}
+
+	if o.Auth.Authentication.Impersonation.Enabled {
+		if o.Auth.Authentication.Impersonation.UserHeader == "" {
+			errs = append(errs, fmt.Errorf("--auth-impersonation-user-header must not be empty when --auth-impersonation-bypass is enabled"))
+		}
+		if o.Auth.Authentication.Impersonation.GroupHeader == "" {
+			errs = append(errs, fmt.Errorf("--auth-impersonation-group-header must not be empty when --auth-impersonation-bypass is enabled"))
+		}
+		if o.Auth.Authentication.Impersonation.UIDHeader == "" {
+			errs = append(errs, fmt.Errorf("--auth-impersonation-uid-header must not be empty when --auth-impersonation-bypass is enabled"))
+		}
+		if o.Auth.Authentication.Impersonation.ExtraHeaderPrefix == "" {
+			errs = append(errs, fmt.Errorf("--auth-impersonation-extra-header-prefix must not be empty when --auth-impersonation-bypass is enabled"))
+		}
+	}
+
+	impersonationSA := o.Auth.Authentication.Impersonation.ServiceAccount
+	if impersonationSA != nil {
+		hasNamespace := impersonationSA.Namespace != ""
+		hasName := impersonationSA.Name != ""
+
+		if hasNamespace != hasName {
+			errs = append(errs, fmt.Errorf("--auth-impersonation-verify-service-account-namespace and --auth-impersonation-verify-service-account-name must be set together"))
+		}
+
+		if (hasNamespace || hasName) && !o.Auth.Authentication.Impersonation.Enabled {
+			errs = append(errs, fmt.Errorf("--auth-impersonation-verify-service-account-namespace and --auth-impersonation-verify-service-account-name require --auth-impersonation-bypass"))
+		}
+
+		if hasNamespace && hasName && o.Auth.Authentication.OIDC.IssuerURL != "" {
+			errs = append(errs, fmt.Errorf("--auth-impersonation-verify-service-account-namespace and --auth-impersonation-verify-service-account-name are not supported with --oidc-issuer"))
+		}
 	}
 
 	for _, pathAllowed := range o.AllowPaths {

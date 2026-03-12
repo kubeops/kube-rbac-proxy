@@ -5,6 +5,19 @@
 This examples is in essence similar to the [non-resource-url](../non-resource-url/) example, with the key difference, that this example requires the ServiceAccount token sent by a client must be scoped to the `kube-rbac-proxy.default.svc` audience. In this example the scoped ServiceAccount token is obtained via a projected volume and mounted into the client container from where it can be consumed. The reasoning here is that scoped tokens cannot be used to impersonate an entity by re-using the token to perform a request against the Kubernetes API itself.
 
 The audience a token must be scoped to is configured within the kube-rbac-proxy using the `--auth-token-audiences` flag.
+
+If you enable impersonation bypass mode, you can optionally require that bearer
+tokens are TokenReview-verified as a specific ServiceAccount before
+impersonation headers are trusted:
+
+```txt
+--auth-impersonation-bypass
+--auth-impersonation-verify-service-account-namespace=<namespace>
+--auth-impersonation-verify-service-account-name=<service-account-name>
+```
+
+Both verification flags must be set together.
+
 ```bash
 $ kubectl create -f deployment.yaml
 ```

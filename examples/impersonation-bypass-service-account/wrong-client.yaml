@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: krp-impersonation-wrong-token
+spec:
+  template:
+    metadata:
+      name: krp-impersonation-wrong-token
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: krp-curl
+        image: quay.io/brancz/krp-curl:v0.0.2
+        command:
+        - /bin/sh
+        - -c
+        - |
+          curl -v -s -k \
+            -H "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+            -H "Impersonate-User: alice@example.com" \
+            https://kube-rbac-proxy.default.svc:8443/metrics
+  backoffLimit: 4
