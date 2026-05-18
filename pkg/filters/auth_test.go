@@ -348,6 +348,46 @@ func TestProxyWithOIDCSupport(t *testing.T) {
 	}
 }
 
+func TestWithAuthentication_ImpersonationBypassUsedForAuthorization(t *testing.T) {
+	cfg := &authn.ImpersonationConfig{
+		Enabled:           true,
+		UserHeader:        "Impersonate-User",
+		GroupHeader:       "Impersonate-Group",
+		UIDHeader:         "Impersonate-Uid",
+		ExtraHeaderPrefix: "Impersonate-Extra-",
+	}
+
+	delegate := authenticatorFunc(func(req *http.Request) (*authenticator.Response, bool, error) {
+		return nil, false, errors.New("delegate should not be called when bypass applies")
+	})
+	bypassAuthenticator := authn.NewImpersonationBypassAuthenticator(delegate, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/accounts", nil)
+	req.Header.Set("Authorization", "Bearer service-account-token")
+	req.Header.Set("Impersonate-User", "jane.doe@example.com")
+	req.Header.Add("Impersonate-Group", "developers")
+
+	authorizer := authorizerFunc(func(ctx context.Context, attr authorizer.Attributes) (authorizer.Decision, string, error) {
+		if got := attr.GetUser().GetName(); got != "jane.doe@example.com" {
+			t.Fatalf("expected authorizer user %q, got %q", "jane.doe@example.com", got)
+		}
+		if len(attr.GetUser().GetGroups()) != 1 || attr.GetUser().GetGroups()[0] != "developers" {
+			t.Fatalf("expected authorizer groups %v, got %v", []string{"developers"}, attr.GetUser().GetGroups())
+		}
+		return authorizer.DecisionAllow, "authorized", nil
+	})
+
+	rec := httptest.NewRecorder()
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	handler = filters.WithAuthorization(authorizer, &authz.Config{}, handler)
+	handler = filters.WithAuthentication(bypassAuthenticator, nil, handler)
+	handler(rec, req)
+
+	if rec.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Result().StatusCode)
+	}
+}
+
 func fakeJWTRequest(method, path, token string) *http.Request {
 	req := httptest.NewRequest(method, path, nil)
 	req.Header.Add("Authorization", token)

@@ -32,10 +32,29 @@ type AuthnHeaderConfig struct {
 
 // AuthnConfig holds all configurations related to authentication options
 type AuthnConfig struct {
-	X509   *X509Config
-	Header *AuthnHeaderConfig
-	OIDC   *OIDCConfig
-	Token  *TokenConfig
+	X509          *X509Config
+	Header        *AuthnHeaderConfig
+	OIDC          *OIDCConfig
+	Token         *TokenConfig
+	Impersonation *ImpersonationConfig
+}
+
+// ImpersonationConfig controls an opt-in mode that trusts Kubernetes
+// impersonation headers and skips delegated TokenReview.
+type ImpersonationConfig struct {
+	Enabled           bool
+	UserHeader        string
+	GroupHeader       string
+	UIDHeader         string
+	ExtraHeaderPrefix string
+	ServiceAccount    *ImpersonationServiceAccountConfig
+}
+
+// ImpersonationServiceAccountConfig optionally constrains bypass mode to tokens
+// verified via TokenReview as a specific ServiceAccount identity.
+type ImpersonationServiceAccountConfig struct {
+	Namespace string
+	Name      string
 }
 
 // X509Config holds public client certificate used for authentication requests if specified
